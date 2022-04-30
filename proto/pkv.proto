@@ -1,0 +1,72 @@
+// protoc --proto_path=proto --go_out=. --go-grpc_out=. ./proto/pkv.proto
+syntax = "proto3";
+
+package pkv;
+option go_package = "./pkv";
+
+service Pkv {
+  rpc Prepare (PkvRequest) returns (PkvResponse) {}
+  rpc Accept (PkvRequest) returns (PkvResponse) {}
+  rpc Commit (PkvRequest) returns (PkvResponse) {}
+}
+
+message InstanceId {
+  string Key = 1;
+  int64 Version = 2;
+}
+
+message ProposalNum {
+  int64 N = 1;
+  int64 ProposerId = 2;
+}
+
+message Value {
+  int64 V = 1;
+}
+
+enum PkvMsgType {
+  PREPARE = 0;
+  ACCEPT = 1;
+  COMMIT = 2;
+}
+
+message PkvRequest {
+  PkvMsgType Type = 1;
+  InstanceId Id = 2;
+  ProposalNum Rnd = 3;
+  Value Val = 4;
+}
+
+message PkvResponse {
+  PkvMsgType Type = 1;
+  ProposalNum LastRnd = 2;
+  Value Val = 3;
+  ProposalNum VRnd = 4;
+}
+
+// message PrepareReq {
+//   InstanceId Id = 1;
+//   ProposalNum Rnd = 2;
+// }
+
+// message PrepareResp {
+//   ProposalNum LastRnd = 1;
+//   Value Val = 2;
+//   ProposalNum VRnd = 3;
+// }
+
+// message AcceptReq {
+//   InstanceId Id = 1;
+//   ProposalNum Rnd = 2;
+//   Value Val = 3;
+// }
+
+// message AcceptResp {
+//   ProposalNum LastRnd = 1;
+// }
+
+// message CommitReq {
+//   InstanceId Id = 1;
+//   ProposalNum Rnd = 2;
+//   Value Val = 3;
+// }
