@@ -3,6 +3,7 @@ package pkv
 import (
 	context "context"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"sync"
@@ -30,6 +31,32 @@ type Version struct {
 	pVRnd    *ProposalNum
 	// Save the version number of the accepted value.
 	Version int64
+}
+
+func RndStr(p *ProposalNum) string {
+	if p == nil {
+		return "(nil)"
+	} else {
+		return fmt.Sprintf("(N:%d, ProposerId:%d)", p.N, p.ProposerId)
+	}
+}
+
+func (v *Version) String() string {
+	if v.pVal == nil {
+		return fmt.Sprintf("<V=nil, VRnd=%s, LastRnd=%s, Ver=%d>",
+			RndStr(v.pVRnd), RndStr(v.pLastRnd), v.Version)
+	} else {
+		return fmt.Sprintf("<V=%d, VRnd=%s, LastRnd=%s, Ver=%d>",
+			v.pVal.V, RndStr(v.pVRnd), RndStr(v.pLastRnd), v.Version)
+	}
+}
+
+func (req *PkvRequest) MyString() string {
+	return fmt.Sprintf("<Type:%s, Id:(%s), Rnd:%s, Val:%s>", req.Type, req.Id, RndStr(req.Rnd), req.Val)
+}
+
+func (r *PkvResponse) MyString() string {
+	return fmt.Sprintf("<Type:%s, LastRnd:%s, Val:%s, VRnd:%s>", r.Type, RndStr(r.LastRnd), r.Val, RndStr(r.VRnd))
 }
 
 type VersionedValue struct {
@@ -103,7 +130,7 @@ func (s *Acceptor) getLockedVersion(id *InstanceId) (*Version, error) {
 		pVer = entry[version]
 	}
 
-	pretty.Logf("[Acceptor] getLockedVersion return: %+v", pVer)
+	pretty.Logf("[Acceptor] getLockedVersion return: %s", pVer)
 	pVer.lock.Lock()
 
 	return pVer, nil
@@ -120,7 +147,7 @@ func (p *ProposalNum) GreaterOrEq(o *ProposalNum) bool {
 }
 
 func (s *Acceptor) Prepare(c context.Context, req *PkvRequest) (*PkvResponse, error) {
-	pretty.Logf("[Acceptor] receive PREPARE request: %+v", req)
+	pretty.Logf("[Acceptor] receive PREPARE request: %s", req.MyString())
 
 	pVer, err := s.getLockedVersion(req.Id)
 	if err != nil {
@@ -128,7 +155,7 @@ func (s *Acceptor) Prepare(c context.Context, req *PkvRequest) (*PkvResponse, er
 	}
 
 	defer pVer.lock.Unlock()
-	pretty.Logf("[Acceptor] got version: %+v", pVer)
+	pretty.Logf("[Acceptor] got version: %s", pVer)
 
 	// Update the "last seen round" in this key version (instance).
 	// We do this first because we'll return pVer.pLastRnd to the proposer later.
@@ -138,7 +165,7 @@ func (s *Acceptor) Prepare(c context.Context, req *PkvRequest) (*PkvResponse, er
 	// 2. If the proposer's Rnd is < than LastRnd, the response will not be
 	//    updated. Proposer will then fail this prepare attempt.
 	if req.Rnd.GreaterOrEq(pVer.pLastRnd) {
-		pretty.Logf("[Acceptor] update LastRnd in this version: %d, %d", req.Rnd.N, req.Rnd.ProposerId)
+		pretty.Logf("[Acceptor] update LastRnd in this version to: %s", RndStr(req.Rnd))
 		pVer.pLastRnd = req.Rnd
 	}
 
@@ -149,12 +176,12 @@ func (s *Acceptor) Prepare(c context.Context, req *PkvRequest) (*PkvResponse, er
 		VRnd:    pVer.pVRnd,
 	}
 
-	pretty.Logf("[Acceptor] send PREPARE response: %+v", resp)
+	pretty.Logf("[Acceptor] send PREPARE response: %s", resp.MyString())
 	return resp, nil
 }
 
 func (s *Acceptor) Accept(ctx context.Context, req *PkvRequest) (*PkvResponse, error) {
-	pretty.Logf("[Acceptor] receive ACCEPT request: %v", req)
+	pretty.Logf("[Acceptor] receive ACCEPT request: %+v", req.MyString())
 
 	pVer, err := s.getLockedVersion(req.Id)
 	if err != nil {
@@ -162,15 +189,15 @@ func (s *Acceptor) Accept(ctx context.Context, req *PkvRequest) (*PkvResponse, e
 	}
 
 	defer pVer.lock.Unlock()
-	pretty.Logf("[Acceptor] got locked version: %+v", pVer)
+	pretty.Logf("[Acceptor] got locked version: %s", pVer)
 
 	// Update this version if proposer's Rnd is >= than its LastRnd.
 	// Better to do it first so that proposer always receives up-to-dated LastRnd.
 	if req.Rnd.GreaterOrEq(pVer.pLastRnd) {
-		pretty.Logf("[Acceptor-2] update version")
 		pVer.pLastRnd = req.Rnd
 		pVer.pVal = req.Val
 		pVer.pVRnd = req.Rnd
+		pretty.Logf("[Acceptor] updated version to %s", pVer)
 
 		// Update the latest version map.
 		pretty.Logf("[Acceptor] Latest version of key %v is now %d", req.Id.Key, pVer.Version)
@@ -185,12 +212,13 @@ func (s *Acceptor) Accept(ctx context.Context, req *PkvRequest) (*PkvResponse, e
 		LastRnd: pVer.pLastRnd,
 	}
 
-	pretty.Logf("[Acceptor] send ACCEPT response: %v", resp)
+	pretty.Logf("[Acceptor] send ACCEPT response: %v", resp.MyString())
 	return resp, nil
 }
 
 func (s *Acceptor) Commit(ctx context.Context, req *PkvRequest) (*PkvResponse, error) {
 	// TODO: implement Commit.
+	pretty.Logf("[Acceptor] COMMIT not implemented yet")
 	return nil, nil
 }
 
@@ -198,7 +226,7 @@ func (s *Acceptor) updateSnapshot(id *InstanceId, ver *Version) bool {
 	s.snapshot.lock.Lock()
 	defer s.snapshot.lock.Unlock()
 
-	pretty.Logf("[updateSnapshot] instance %v, version %v", id, ver)
+	pretty.Logf("[updateSnapshot] instance %v, version %s", id, ver)
 	key := id.Key
 	vval, found := s.snapshot.vvals[key]
 	if !found {
@@ -277,7 +305,7 @@ func (p *Proposer) sendRequests(rpcType PkvMsgType) []*PkvResponse {
 		if err != nil {
 			pretty.Logf("[RPC] failed with server %s: %v", addr, err)
 		} else {
-			pretty.Logf("[RPC] server %s responded %v", addr, resp)
+			pretty.Logf("[RPC] server %s responded %s", addr, resp.MyString())
 			responses = append(responses, resp)
 		}
 	}
@@ -334,7 +362,7 @@ func (p *Proposer) Phase1() (*Value, *ProposalNum, error) {
 	acceptedVal := Value{}
 	acceptedVRnd := ProposalNum{}
 	for _, r := range responses {
-		pretty.Logf("[Proposer %d Phase-1] got response %v", p.Rnd.ProposerId, r)
+		pretty.Logf("[Proposer %d Phase-1] got response %s", p.Rnd.ProposerId, r.MyString())
 		if !p.Rnd.GreaterOrEq(r.LastRnd) {
 			// "LastRnd" from the response is larger than our Rnd.
 			// Record the highest "LastRnd" from responses.
@@ -367,6 +395,7 @@ func (p *Proposer) Phase1() (*Value, *ProposalNum, error) {
 		}
 	} else {
 		// Phase-1 failed, return the highest round we saw.
+		pretty.Logf("[Proposer %d Phase-1] failed, highest Rnd %s", p.Rnd.ProposerId, &highestRnd)
 		return nil, &highestRnd, ErrNotEnoughQuorum
 	}
 }
@@ -384,7 +413,7 @@ func (p *Proposer) Phase2() (*ProposalNum, error) {
 	}
 	numAccepted := 0
 	for _, r := range responses {
-		pretty.Logf("[Proposer %d Phase-2] got response %v", p.Rnd.ProposerId, r)
+		pretty.Logf("[Proposer %d Phase-2] got response %s", p.Rnd.ProposerId, r.MyString())
 		if !p.Rnd.GreaterOrEq(r.LastRnd) {
 			// Acceptor's LastRnd is higher than ours, so our request is rejected.
 			// We need to record the highest LastRnd from the responses.
@@ -399,7 +428,7 @@ func (p *Proposer) Phase2() (*ProposalNum, error) {
 		pretty.Logf("[Proposer %d Phase-2] got quorum %d", p.Rnd.ProposerId, numAccepted)
 		return nil, nil
 	} else {
-		pretty.Logf("[Proposer %d Phase-2] failed, highest Rnd %v", p.Rnd.ProposerId, &highestRnd)
+		pretty.Logf("[Proposer %d Phase-2] failed, highest Rnd %s", p.Rnd.ProposerId, &highestRnd)
 		return &highestRnd, ErrNotEnoughQuorum
 	}
 }

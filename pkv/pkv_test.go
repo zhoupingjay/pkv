@@ -10,7 +10,7 @@ func TestSet(t *testing.T) {
 		t.Errorf("Failed to start servers")
 	}
 
-	client := NewClient(0)
+	client := NewClient(13)
 	val := client.Set("key1", 1234)
 
 	if val == nil {
