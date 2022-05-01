@@ -200,8 +200,10 @@ func (s *Acceptor) Accept(ctx context.Context, req *PkvRequest) (*PkvResponse, e
 		pretty.Logf("[Acceptor] updated version to %s", pVer)
 
 		// Update the latest version map.
-		pretty.Logf("[Acceptor] Latest version of key %v is now %d", req.Id.Key, pVer.Version)
-		s.latest[req.Id.Key] = pVer.Version
+		if pVer.Version > s.latest[req.Id.Key] {
+			pretty.Logf("[Acceptor] Latest version of key %v is now %d", req.Id.Key, pVer.Version)
+			s.latest[req.Id.Key] = pVer.Version
+		}
 
 		// Update snapshot with this version.
 		// s.updateSnapshot(req.Id, pVer)
@@ -395,7 +397,7 @@ func (p *Proposer) Phase1() (*Value, *ProposalNum, error) {
 		}
 	} else {
 		// Phase-1 failed, return the highest round we saw.
-		pretty.Logf("[Proposer %d Phase-1] failed, highest Rnd %s", p.Rnd.ProposerId, &highestRnd)
+		pretty.Logf("[Proposer %d Phase-1] failed, highest Rnd %s", p.Rnd.ProposerId, RndStr(&highestRnd))
 		return nil, &highestRnd, ErrNotEnoughQuorum
 	}
 }
@@ -428,7 +430,7 @@ func (p *Proposer) Phase2() (*ProposalNum, error) {
 		pretty.Logf("[Proposer %d Phase-2] got quorum %d", p.Rnd.ProposerId, numAccepted)
 		return nil, nil
 	} else {
-		pretty.Logf("[Proposer %d Phase-2] failed, highest Rnd %s", p.Rnd.ProposerId, &highestRnd)
+		pretty.Logf("[Proposer %d Phase-2] failed, highest Rnd %s", p.Rnd.ProposerId, RndStr(&highestRnd))
 		return &highestRnd, ErrNotEnoughQuorum
 	}
 }
@@ -438,14 +440,14 @@ func (p *Proposer) Paxos() *Value {
 		// Phase 1 of Paxos...
 		pAcceptedVal, pHighestRnd, err := p.Phase1()
 		if err != nil {
-			pretty.Logf("[Paxos] phase-1 failed, got highestRnd %v", pHighestRnd)
+			pretty.Logf("[Paxos] phase-1 failed, got highestRnd %s", RndStr(pHighestRnd))
 			p.Rnd.N = pHighestRnd.N + 1
 			continue
 		}
 		if pAcceptedVal == nil {
 			pretty.Logf("[Paxos] phase-1 no accepted value seen, proceed with our value %v", p.Val)
 		} else {
-			pretty.Logf("[Paxos] phase-1 update proposing value to %v", pAcceptedVal)
+			pretty.Logf("[Paxos] phase-1 force update proposing value to %v", pAcceptedVal)
 			p.Val = pAcceptedVal
 		}
 		if p.Val == nil {
@@ -457,7 +459,7 @@ func (p *Proposer) Paxos() *Value {
 		// Phase 2 of Paxos...
 		pHighestRnd, err = p.Phase2()
 		if err != nil {
-			pretty.Logf("[Paxos] phase-2 failed, got highestRnd %v", pHighestRnd)
+			pretty.Logf("[Paxos] phase-2 failed, got highestRnd %s", RndStr(pHighestRnd))
 			p.Rnd.N = pHighestRnd.N + 1
 			continue
 		}
@@ -486,14 +488,18 @@ func NewClient(cid int64) *Client {
 }
 
 func (c *Client) Set(key string, val int64) *Value {
-	pretty.Logf("[Client] Set Key %s = %v", key, val)
+	return c.SetVersion(key, val, -1)
+}
+
+func (c *Client) SetVersion(key string, val int64, ver int64) *Value {
+	pretty.Logf("[Client] Set Key %s = %v (version %d)", key, val, ver)
 	if c.proposer == nil {
 		c.proposer = &Proposer{
 			Id: &InstanceId{},
 		}
 	}
 	c.proposer.Id.Key = key
-	c.proposer.Id.Version = -1
+	c.proposer.Id.Version = ver
 	c.proposer.Val = &Value{
 		V: val,
 	}
